@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/widgets.dart';
@@ -58,4 +59,12 @@ Future<String> platformGetDatabasePath(String dbName) async {
 /// 使用系统应用打开图片
 Future<void> platformOpenImage(BuildContext context, String source) async {
   await OpenFile.open(source);
+}
+
+/// 读取图片文件并返回 base64 编码字符串（文件不存在返回 null）
+Future<String?> platformReadImageAsBase64(String pathOrUri) async {
+  final file = File(pathOrUri);
+  if (!await file.exists()) return null;
+  final bytes = await file.readAsBytes();
+  return base64Encode(bytes);
 }

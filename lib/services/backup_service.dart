@@ -1,13 +1,14 @@
 import 'dart:convert';
 import 'backup_helper.dart';
 import 'database_service.dart';
+import 'platform_helper.dart';
 import '../models/recipe.dart';
 
 /// 备份服务 - 负责数据的导出和导入
 class BackupService {
   final DatabaseService _dbService = DatabaseService();
 
-  /// 导出所有配方数据
+  /// 导出所有配方数据（含图片 base64）
   Future<bool> exportAllRecipes() async {
     try {
       // 1. 获取所有配方
@@ -17,10 +18,22 @@ class BackupService {
         return false;
       }
 
-      // 2. 转换为 JSON 格式
-      final recipesJson = recipes.map((recipe) => recipe.toMap()).toList();
+      // 2. 转换为 JSON 格式，并读取图片数据
+      final List<Map<String, dynamic>> recipesJson = [];
+      for (final recipe in recipes) {
+        final map = recipe.toMap();
+        // 读取每张图片并编码为 base64
+        final List<String> imagesBase64 = [];
+        for (final path in recipe.imagePaths) {
+          final base64Data = await platformReadImageAsBase64(path);
+          imagesBase64.add(base64Data ?? '');
+        }
+        map['images_base64'] = jsonEncode(imagesBase64);
+        recipesJson.add(map);
+      }
+
       final jsonString = const JsonEncoder.withIndent('  ').convert({
-        'version': '1.0',
+        'version': '1.1',
         'export_time': DateTime.now().toIso8601String(),
         'recipes': recipesJson,
       });
@@ -32,7 +45,7 @@ class BackupService {
     }
   }
 
-  /// 导入配方数据
+  /// 导入配方数据（支持跨设备图片恢复）
   Future<ImportResult> importRecipes() async {
     try {
       // 1. 平台适配的文件读取
@@ -58,32 +71,45 @@ class BackupService {
 
       for (final recipeData in recipesList) {
         try {
-          final recipe = Recipe.fromMap(recipeData as Map<String, dynamic>);
+          final dataMap = recipeData as Map<String, dynamic>;
+          final recipe = Recipe.fromMap(dataMap);
+
+          // 恢复图片：优先从 base64 数据重建，否则保留原路径（同设备兼容）
+          final List<String> imagePaths = [];
+          if (dataMap.containsKey('images_base64')) {
+            final imagesBase64 = jsonDecode(dataMap['images_base64'] as String) as List;
+            for (int i = 0; i < imagesBase64.length; i++) {
+              final base64Str = imagesBase64[i] as String;
+              if (base64Str.isNotEmpty) {
+                try {
+                  final bytes = base64Decode(base64Str);
+                  final path = await _dbService.saveImage(
+                    bytes,
+                    'imported_${DateTime.now().millisecondsSinceEpoch}_$i.jpg',
+                  );
+                  imagePaths.add(path);
+                } catch (_) {
+                  // 跳过损坏的图片数据
+                }
+              }
+            }
+          } else {
+            // 旧版本 JSON（无 images_base64）：保留原路径（同设备恢复）
+            imagePaths.addAll(recipe.imagePaths);
+          }
 
           // 检查配方名称是否已存在
           final existingRecipes = await _dbService.getRecipes();
           final nameExists = existingRecipes.any((r) => r.name == recipe.name);
+          final importName = nameExists ? '${recipe.name} (导入)' : recipe.name;
 
-          if (nameExists) {
-            // 如果名称存在,添加后缀
-            final newName = '${recipe.name} (导入)';
-            final modifiedRecipe = Recipe.fromMineralFormulas(
-              name: newName,
-              createdAt: DateTime.now(),
-              mineralAmounts: recipe.getMineralFormulaAmounts(),
-              imagePaths: [], // 导入时不包含图片
-            );
-            await _dbService.insertRecipe(modifiedRecipe);
-          } else {
-            // 创建新配方(不包含图片)
-            final modifiedRecipe = Recipe.fromMineralFormulas(
-              name: recipe.name,
-              createdAt: DateTime.now(),
-              mineralAmounts: recipe.getMineralFormulaAmounts(),
-              imagePaths: [],
-            );
-            await _dbService.insertRecipe(modifiedRecipe);
-          }
+          final modifiedRecipe = Recipe.fromMineralFormulas(
+            name: importName,
+            createdAt: DateTime.now(),
+            mineralAmounts: recipe.getMineralFormulaAmounts(),
+            imagePaths: imagePaths,
+          );
+          await _dbService.insertRecipe(modifiedRecipe);
 
           importedCount++;
         } catch (e) {

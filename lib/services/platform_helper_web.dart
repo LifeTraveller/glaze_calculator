@@ -54,6 +54,14 @@ Future<String> platformGetDatabasePath(String dbName) async {
   return dbName;
 }
 
+/// 从 base64 Data URI 提取 base64 字符串
+Future<String?> platformReadImageAsBase64(String pathOrUri) async {
+  if (!pathOrUri.startsWith('data:')) return null;
+  final parts = pathOrUri.split(',');
+  if (parts.length < 2) return null;
+  return parts[1];
+}
+
 /// Web 端在弹窗中预览图片
 Future<void> platformOpenImage(BuildContext context, String source) async {
   final base64Str = source.split(',').last;

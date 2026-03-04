@@ -26,3 +26,7 @@ Future<String> platformGetDatabasePath(String dbName) =>
 /// 打开/预览图片
 Future<void> platformOpenImage(BuildContext context, String source) =>
     throw UnsupportedError('当前平台不支持');
+
+/// 读取图片并返回 base64 编码字符串（失败返回 null）
+Future<String?> platformReadImageAsBase64(String pathOrUri) =>
+    throw UnsupportedError('当前平台不支持');
